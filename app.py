@@ -5,7 +5,7 @@ import time
 from collections import Counter
 from flask import Flask
 
-# Minimal web server required by Render.com free Web Service tier
+# Minimal web service required by Render.com free tier
 app = Flask(__name__)
 
 @app.route('/')
@@ -14,7 +14,6 @@ def home():
 
 # ================= CONFIGURATION =================
 BOT_TOKEN = "9039066795:AAFdu2sSYHMfGoj8o0py7sxhUOx9POk8mwk"
-CHAT_ID = "5291518141"
 # =================================================
 
 BASE_API = "https://api-cs.casino.org/svc-evolution-game-events/api/autoroulette"
@@ -172,9 +171,10 @@ def get_menu_keyboard():
         ]
     }
 
-def send_telegram(text, reply_markup=None):
+def send_telegram(chat_id, text, reply_markup=None):
+    """Sends messages directly to the initiating user's chat_id"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         payload["reply_markup"] = reply_markup
     try:
@@ -198,19 +198,25 @@ def bot_polling_loop():
             for item in res.get("result", []):
                 offset = item["update_id"] + 1
 
+                # Handle inline button clicks
                 if "callback_query" in item:
                     cq = item["callback_query"]
                     cb_data = cq.get("data")
+                    user_chat_id = cq.get("message", {}).get("chat", {}).get("id")
                     answer_callback(cq.get("id"))
 
                     counts = {"btn_25": 25, "btn_30": 30, "btn_35": 35, "btn_40": 40, "btn_45": 45, "btn_50": 50}
-                    if cb_data in counts:
+                    if cb_data in counts and user_chat_id:
                         report = analyze_spins_request(counts[cb_data])
-                        send_telegram(report, get_menu_keyboard())
+                        send_telegram(user_chat_id, report, get_menu_keyboard())
 
+                # Handle incoming messages
                 elif "message" in item:
-                    msg_text = item["message"].get("text", "").strip()
-                    if msg_text == "/start":
+                    msg = item["message"]
+                    user_chat_id = msg.get("chat", {}).get("id")
+                    msg_text = msg.get("text", "").strip()
+
+                    if msg_text == "/start" and user_chat_id:
                         welcome = (
                             "👋 <b>Auto Roulette Wheel Tracker</b>\n\n"
                             "Select an option below to analyze live spins:\n"
@@ -219,12 +225,12 @@ def bot_polling_loop():
                             "• Repeated Numbers (> 2 times)\n"
                             "• 9 Consecutive empty slots in Wheel Sequence"
                         )
-                        send_telegram(welcome, get_menu_keyboard())
+                        send_telegram(user_chat_id, welcome, get_menu_keyboard())
         except Exception:
             time.sleep(2)
         time.sleep(0.5)
 
-# Run bot polling loop in background thread
+# Run polling loop in background thread
 threading.Thread(target=bot_polling_loop, daemon=True).start()
 
 if __name__ == "__main__":
