@@ -24,11 +24,11 @@ HEADERS = {
     "Accept": "application/json, text/plain, */*"
 }
 
-# Part 1: Clockwise from 9 to 6 (18 numbers)
-PART_1 = [9, 31, 14, 20, 1, 33, 16, 24, 5, 10, 23, 8, 30, 11, 36, 13, 27, 6]
-
-# Part 2: Clockwise from 22 to 34 (18 numbers - excluding 0)
-PART_2 = [22, 18, 29, 7, 28, 12, 35, 3, 26, 32, 15, 19, 4, 21, 2, 25, 17, 34]
+# 4 Groups (9 Numbers Each)
+GROUP_1 = set(range(1, 10))   # 1 to 9
+GROUP_2 = set(range(10, 19))  # 10 to 18
+GROUP_3 = set(range(19, 28))  # 19 to 27
+GROUP_4 = set(range(28, 37))  # 28 to 36
 
 RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 BLACK_NUMBERS = {2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35}
@@ -89,37 +89,34 @@ def analyze_spins_request(count):
     zero_hit = 0 in hit_set
     zero_status = "YES (HIT)" if zero_hit else "NO (NOT HIT)"
 
-    # 3. Numbers repeated > 2 times (3 or more)
+    # 3. Repeated Numbers Logic
     counts = Counter(spins)
-    repeats = {num: cnt for num, cnt in counts.items() if cnt > 2}
+    if count == 25:
+        # માત્ર 25 સ્પિન માટે: 2 અથવા વધુ વખત (>= 2)
+        repeats = {num: cnt for num, cnt in counts.items() if cnt >= 2}
+        repeat_title = "Repeated Numbers (≥2 times):"
+    else:
+        # અન્ય સ્પિન (30, 35, 40, 45, 50) માટે: 2 થી વધુ વખત (> 2)
+        repeats = {num: cnt for num, cnt in counts.items() if cnt > 2}
+        repeat_title = "Repeated Numbers (>2 times):"
+
     if repeats:
         repeat_list = [f"#{num} ({cnt}x)" for num, cnt in sorted(repeats.items(), key=lambda x: x[1], reverse=True)]
         repeat_str = ", ".join(repeat_list)
     else:
         repeat_str = "None"
 
-    # 4. Wheel Halves Performance & Part-Wise Unhit Numbers (Excluding 0)
-    p1_count = sum(1 for n in spins if n in PART_1)
-    p2_count = sum(1 for n in spins if n in PART_2)
-    non_zero_spins = p1_count + p2_count
+    # 4. 4 Groups Performance (1-9, 10-18, 19-27, 28-36 - Excluding 0)
+    g1_count = sum(1 for n in spins if n in GROUP_1)
+    g2_count = sum(1 for n in spins if n in GROUP_2)
+    g3_count = sum(1 for n in spins if n in GROUP_3)
+    g4_count = sum(1 for n in spins if n in GROUP_4)
+    non_zero_spins = g1_count + g2_count + g3_count + g4_count
 
-    p1_pct = (p1_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
-    p2_pct = (p2_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
-
-    # Part 1 Missing (Red & Black)
-    p1_missing = [n for n in PART_1 if n not in hit_set]
-    p1_red = [str(n) for n in p1_missing if n in RED_NUMBERS]
-    p1_black = [str(n) for n in p1_missing if n in BLACK_NUMBERS]
-
-    # Part 2 Missing (Red & Black - excluding 0)
-    p2_missing = [n for n in PART_2 if n not in hit_set]
-    p2_red = [str(n) for n in p2_missing if n in RED_NUMBERS]
-    p2_black = [str(n) for n in p2_missing if n in BLACK_NUMBERS]
-
-    p1_red_str = ", ".join(p1_red) if p1_red else "None"
-    p1_black_str = ", ".join(p1_black) if p1_black else "None"
-    p2_red_str = ", ".join(p2_red) if p2_red else "None"
-    p2_black_str = ", ".join(p2_black) if p2_black else "None"
+    g1_pct = (g1_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
+    g2_pct = (g2_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
+    g3_pct = (g3_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
+    g4_pct = (g4_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
 
     msg = (
         f"📊 <b>ANALYTICS REPORT: LAST {count} SPINS</b>\n"
@@ -130,15 +127,13 @@ def analyze_spins_request(count):
         f"🔴 <b>Red Unhit:</b> <code>{red_str}</code>\n"
         f"⚫ <b>Black Unhit:</b> <code>{black_str}</code>\n"
         f"🟢 <b>Zero (0) Trigger:</b> <b>{zero_status}</b>\n\n"
-        f"3️⃣ <b>Repeated Numbers (&gt;2 times):</b>\n"
+        f"3️⃣ <b>{repeat_title}</b>\n"
         f"🔥 <code>{repeat_str}</code>\n\n"
-        f"4️⃣ <b>Wheel Parts Performance (Excluding 0):</b>\n"
-        f"• <b>Part 1 (9 to 6):</b> <code>{p1_pct:.1f}%</code> ({p1_count} spins)\n"
-        f"  🔴 Red Unhit: <code>{p1_red_str}</code>\n"
-        f"  ⚫ Black Unhit: <code>{p1_black_str}</code>\n\n"
-        f"• <b>Part 2 (22 to 34):</b> <code>{p2_pct:.1f}%</code> ({p2_count} spins)\n"
-        f"  🔴 Red Unhit: <code>{p2_red_str}</code>\n"
-        f"  ⚫ Black Unhit: <code>{p2_black_str}</code>\n"
+        f"4️⃣ <b>4-Group Performance (Excluding 0):</b>\n"
+        f"• <b>1 to 9:</b> <code>{g1_pct:.1f}%</code> ({g1_count} spins)\n"
+        f"• <b>10 to 18:</b> <code>{g2_pct:.1f}%</code> ({g2_count} spins)\n"
+        f"• <b>19 to 27:</b> <code>{g3_pct:.1f}%</code> ({g3_count} spins)\n"
+        f"• <b>28 to 36:</b> <code>{g4_pct:.1f}%</code> ({g4_count} spins)\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     return msg
@@ -213,8 +208,8 @@ def bot_polling_loop():
                                 "Select an option below to analyze live spins:\n"
                                 "• 1️⃣ Last 10 Numbers (Live Flow)\n"
                                 "• 2️⃣ Unhit Red, Black & Zero Trigger Status\n"
-                                "• 3️⃣ Numbers Repeated &gt; 2 Times\n"
-                                "• 4️⃣ Wheel Halves (Part 1 vs Part 2) & Missing Numbers"
+                                "• 3️⃣ Repeated Numbers\n"
+                                "• 4️⃣ 4-Group Breakdown (1-9, 10-18, 19-27, 28-36)"
                             )
                             send_telegram(user_chat_id, welcome, get_menu_keyboard())
                         else:
