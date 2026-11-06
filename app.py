@@ -26,11 +26,10 @@ HEADERS = {
     "Accept": "application/json, text/plain, */*"
 }
 
-# 4 Groups (9 Numbers Each)
-GROUP_1 = set(range(1, 10))   # 1 to 9
-GROUP_2 = set(range(10, 19))  # 10 to 18
-GROUP_3 = set(range(19, 28))  # 19 to 27
-GROUP_4 = set(range(28, 37))  # 28 to 36
+# 3 Dozens (12 Numbers Each)
+DOZEN_1 = set(range(1, 13))   # 1 to 12
+DOZEN_2 = set(range(13, 25))  # 13 to 24
+DOZEN_3 = set(range(25, 37))  # 25 to 36
 
 RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 BLACK_NUMBERS = {2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35}
@@ -40,7 +39,7 @@ def get_color_emoji(n):
         return "🟢"
     return "🔴" if n in RED_NUMBERS else "⚫"
 
-def fetch_direct_spins(needed_count):
+def fetch_direct_spins(needed_count=30):
     """Fetch latest spins for real-time analytics"""
     url = f"{BASE_API}?size={max(needed_count, 50)}&sort=desc"
     results = []
@@ -79,25 +78,23 @@ def fetch_1500_spins():
                         
                         if num == 0:
                             color = "Green"
-                            group = "Zero"
+                            dozen = "None"
                             parity = "Zero"
                         else:
                             color = "Red" if num in RED_NUMBERS else "Black"
                             parity = "Even" if num % 2 == 0 else "Odd"
-                            if 1 <= num <= 9:
-                                group = "1-9"
-                            elif 10 <= num <= 18:
-                                group = "10-18"
-                            elif 19 <= num <= 27:
-                                group = "19-27"
+                            if num in DOZEN_1:
+                                dozen = "1st Dozen (1-12)"
+                            elif num in DOZEN_2:
+                                dozen = "2nd Dozen (13-24)"
                             else:
-                                group = "28-36"
+                                dozen = "3rd Dozen (25-36)"
 
                         spins.append({
                             "id": sid,
                             "number": num,
                             "color": color,
-                            "group": group,
+                            "dozen": dozen,
                             "parity": parity,
                             "time": settled_at
                         })
@@ -107,75 +104,72 @@ def fetch_1500_spins():
         print("Fetch 1500 Error:", e)
     return spins
 
-def analyze_spins_request(count):
-    spins = fetch_direct_spins(count)
+def analyze_30_spins():
+    spins = fetch_direct_spins(30)
     total = len(spins)
     
-    if total < count:
-        return f"⚠️ Server currently has {total} spins available. Please try again in a few moments."
+    if total < 30:
+        return f"⚠️ હાલમાં સર્વર પાસે માત્ર {total} સ્પિન ઉપલબ્ધ છે. કૃપા કરીને થોડીવાર પછી પ્રયાસ કરો."
 
+    # 1. તમામ 30 લેટેસ્ટ નંબર્સ (લાઈવ ક્રમ)
+    all_30_str = " ➔ ".join([f"{get_color_emoji(x)}{x}" for x in spins])
+
+    # 2. આવી ગયેલા નંબર્સ (Hit Numbers - Red અને Black અલગ)
     hit_set = set(spins)
+    hit_red = sorted([n for n in hit_set if n in RED_NUMBERS])
+    hit_black = sorted([n for n in hit_set if n in BLACK_NUMBERS])
+    hit_red_str = ", ".join(map(str, hit_red)) if hit_red else "None"
+    hit_black_str = ", ".join(map(str, hit_black)) if hit_black else "None"
 
-    # 1. Last 10 Spins Numbers (Live Flow)
-    last_10 = spins[:10]
-    last_10_str = " ➔ ".join([f"{get_color_emoji(x)}{x}" for x in last_10])
-
-    # 2. Overall Unhit Numbers (1 to 36)
+    # 3. નહીં આવેલા નંબર્સ (Unhit Numbers - Red અને Black અલગ)
     all_36 = set(range(1, 37))
     unhit_36 = all_36 - hit_set
     unhit_red = sorted([n for n in unhit_36 if n in RED_NUMBERS])
     unhit_black = sorted([n for n in unhit_36 if n in BLACK_NUMBERS])
+    unhit_red_str = ", ".join(map(str, unhit_red)) if unhit_red else "None"
+    unhit_black_str = ", ".join(map(str, unhit_black)) if unhit_black else "None"
 
-    red_str = ", ".join(map(str, unhit_red)) if unhit_red else "None"
-    black_str = ", ".join(map(str, unhit_black)) if unhit_black else "None"
+    # 4. Zero (0) હિટ સ્ટેટસ
+    zero_count = spins.count(0)
+    zero_status = f"YES (HIT - {zero_count}x)" if zero_count > 0 else "NO (NOT HIT)"
 
-    # Zero Hit Trigger Status
-    zero_hit = 0 in hit_set
-    zero_status = "YES (HIT)" if zero_hit else "NO (NOT HIT)"
-
-    # 3. Repeated Numbers Logic
+    # 5. 2 થી વધુ વખત આવેલા નંબર્સ (> 2 times)
     counts = Counter(spins)
-    if count == 25:
-        repeats = {num: cnt for num, cnt in counts.items() if cnt >= 2}
-        repeat_title = "Repeated Numbers (≥2 times):"
-    else:
-        repeats = {num: cnt for num, cnt in counts.items() if cnt > 2}
-        repeat_title = "Repeated Numbers (>2 times):"
-
+    repeats = {num: cnt for num, cnt in counts.items() if cnt > 2}
     if repeats:
-        repeat_list = [f"#{num} ({cnt}x)" for num, cnt in sorted(repeats.items(), key=lambda x: x[1], reverse=True)]
+        repeat_list = [f"{get_color_emoji(num)}#{num} ({cnt}x)" for num, cnt in sorted(repeats.items(), key=lambda x: x[1], reverse=True)]
         repeat_str = ", ".join(repeat_list)
     else:
         repeat_str = "None"
 
-    # 4. 4 Groups Performance
-    g1_count = sum(1 for n in spins if n in GROUP_1)
-    g2_count = sum(1 for n in spins if n in GROUP_2)
-    g3_count = sum(1 for n in spins if n in GROUP_3)
-    g4_count = sum(1 for n in spins if n in GROUP_4)
-    non_zero_spins = g1_count + g2_count + g3_count + g4_count
+    # 6. 1, 2, 3 ડઝન ટકાવારી અને કાઉન્ટ (0 સિવાય)
+    d1_count = sum(1 for n in spins if n in DOZEN_1)
+    d2_count = sum(1 for n in spins if n in DOZEN_2)
+    d3_count = sum(1 for n in spins if n in DOZEN_3)
+    non_zero_spins = d1_count + d2_count + d3_count
 
-    g1_pct = (g1_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
-    g2_pct = (g2_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
-    g3_pct = (g3_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
-    g4_pct = (g4_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
+    d1_pct = (d1_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
+    d2_pct = (d2_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
+    d3_pct = (d3_count / non_zero_spins * 100) if non_zero_spins > 0 else 0
 
     msg = (
-        f"📊 <b>ANALYTICS REPORT: LAST {count} SPINS</b>\n"
+        f"📊 <b>ANALYTICS REPORT: LAST 30 SPINS</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"1️⃣ <b>Last 10 Spins Numbers:</b>\n"
-        f"👉 {last_10_str}\n\n"
-        f"2️⃣ <b>Overall Unhit Numbers (Last {count} Spins):</b>\n"
-        f"🔴 <b>Red Unhit:</b> <code>{red_str}</code>\n"
-        f"⚫ <b>Black Unhit:</b> <code>{black_str}</code>\n"
-        f"🟢 <b>Zero (0) Trigger:</b> <b>{zero_status}</b>\n\n"
-        f"3️⃣ <b>{repeat_title}</b>\n"
-        f"🔥 <code>{repeat_str}</code>\n\n"
-        f"4️⃣ <b>4-Group Performance (Excluding 0):</b>\n"
-        f"• <b>1 to 9:</b> <code>{g1_pct:.1f}%</code> ({g1_count} spins)\n"
-        f"• <b>10 to 18:</b> <code>{g2_pct:.1f}%</code> ({g2_count} spins)\n"
-        f"• <b>19 to 27:</b> <code>{g3_pct:.1f}%</code> ({g3_count} spins)\n"
-        f"• <b>28 to 36:</b> <code>{g4_pct:.1f}%</code> ({g4_count} spins)\n"
+        f"1️⃣ <b>All 30 Spins Flow (Latest to Old):</b>\n"
+        f"👉 {all_30_str}\n\n"
+        f"2️⃣ <b>આવી ગયેલા નંબર્સ (Hit Numbers):</b>\n"
+        f"🔴 <b>Red Hit:</b> <code>{hit_red_str}</code>\n"
+        f"⚫ <b>Black Hit:</b> <code>{hit_black_str}</code>\n\n"
+        f"3️⃣ <b>નહીં આવેલા નંબર્સ (Unhit Numbers):</b>\n"
+        f"🔴 <b>Red Unhit:</b> <code>{unhit_red_str}</code>\n"
+        f"⚫ <b>Black Unhit:</b> <code>{unhit_black_str}</code>\n\n"
+        f"4️⃣ <b>Zero (0) Trigger:</b> <b>{zero_status}</b>\n\n"
+        f"5️⃣ <b>૨ થી વધુ વખત આવેલા નંબર્સ (> 2 times):</b>\n"
+        f"🔥 {repeat_str}\n\n"
+        f"6️⃣ <b>Dozens Performance (Excluding 0):</b>\n"
+        f"• <b>1st Dozen (1-12):</b> <code>{d1_pct:.1f}%</code> ({d1_count} spins)\n"
+        f"• <b>2nd Dozen (13-24):</b> <code>{d2_pct:.1f}%</code> ({d2_count} spins)\n"
+        f"• <b>3rd Dozen (25-36):</b> <code>{d3_pct:.1f}%</code> ({d3_count} spins)\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     return msg
@@ -184,16 +178,7 @@ def get_menu_keyboard():
     return {
         "inline_keyboard": [
             [
-                {"text": "🎯 25 Spins", "callback_data": "btn_25"},
-                {"text": "🎯 30 Spins", "callback_data": "btn_30"}
-            ],
-            [
-                {"text": "🎯 35 Spins", "callback_data": "btn_35"},
-                {"text": "🎯 40 Spins", "callback_data": "btn_40"}
-            ],
-            [
-                {"text": "🎯 45 Spins", "callback_data": "btn_45"},
-                {"text": "🎯 50 Spins", "callback_data": "btn_50"}
+                {"text": "🎯 Last 30 Spins", "callback_data": "btn_30"}
             ],
             [
                 {"text": "📥 Download 1500 Spins (Excel)", "callback_data": "btn_download_1500"}
@@ -241,9 +226,9 @@ def handle_download_1500(chat_id):
     # Create CSV in-memory
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Spin_No", "Round_ID", "Winning_Number", "Color", "Group", "Odd_Even", "Settled_At"])
+    writer.writerow(["Spin_No", "Round_ID", "Winning_Number", "Color", "Dozen", "Odd_Even", "Settled_At"])
     for idx, s in enumerate(spins, 1):
-        writer.writerow([idx, s["id"], s["number"], s["color"], s["group"], s["parity"], s["time"]])
+        writer.writerow([idx, s["id"], s["number"], s["color"], s["dozen"], s["parity"], s["time"]])
 
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     filename = f"AutoRoulette_1500_Spins_{timestamp}.csv"
@@ -270,11 +255,9 @@ def bot_polling_loop():
 
                     if cb_data == "btn_download_1500" and user_chat_id:
                         handle_download_1500(user_chat_id)
-                    else:
-                        counts = {"btn_25": 25, "btn_30": 30, "btn_35": 35, "btn_40": 40, "btn_45": 45, "btn_50": 50}
-                        if cb_data in counts and user_chat_id:
-                            report = analyze_spins_request(counts[cb_data])
-                            send_telegram(user_chat_id, report, get_menu_keyboard())
+                    elif cb_data == "btn_30" and user_chat_id:
+                        report = analyze_30_spins()
+                        send_telegram(user_chat_id, report, get_menu_keyboard())
 
                 # Handle incoming messages
                 elif "message" in item:
@@ -283,26 +266,21 @@ def bot_polling_loop():
                     msg_text = msg.get("text", "").strip()
 
                     if user_chat_id:
-                        if msg_text == "/start":
+                        if msg_text in ["/start", "start"]:
                             welcome = (
                                 "👋 <b>Auto Roulette Wheel Tracker</b>\n\n"
-                                "Select an option below to analyze live spins or export raw data:\n"
-                                "• 1️⃣ Last 10 Numbers (Live Flow)\n"
-                                "• 2️⃣ Unhit Red, Black & Zero Trigger Status\n"
-                                "• 3️⃣ Repeated Numbers\n"
-                                "• 4️⃣ 4-Group Breakdown (1-9, 10-18, 19-27, 28-36)\n"
-                                "• 📥 Download 1500 Spins (Excel)"
+                                "નીચે આપેલા વિકલ્પોમાંથી પસંદ કરો:\n"
+                                "• 🎯 <b>Last 30 Spins:</b> ૩૦ સ્પિનનું સંપૂર્ણ લાઇવ એનાલિસિસ\n"
+                                "• 📥 <b>Download 1500 Spins:</b> તાજેતરના ૧,૫૦૦ સ્પિનની Excel ડાઉનલોડ"
                             )
                             send_telegram(user_chat_id, welcome, get_menu_keyboard())
                         elif msg_text.lower() in ["/download", "download", "excel", "1500"]:
                             handle_download_1500(user_chat_id)
+                        elif msg_text.lower() in ["/30", "30", "spin", "spins"]:
+                            report = analyze_30_spins()
+                            send_telegram(user_chat_id, report, get_menu_keyboard())
                         else:
-                            clean_val = msg_text.replace("/", "")
-                            if clean_val.isdigit() and int(clean_val) in [25, 30, 35, 40, 45, 50]:
-                                report = analyze_spins_request(int(clean_val))
-                                send_telegram(user_chat_id, report, get_menu_keyboard())
-                            else:
-                                send_telegram(user_chat_id, "🎲 Please use the buttons below to analyze spins or download data:", get_menu_keyboard())
+                            send_telegram(user_chat_id, "🎲 નીચે આપેલા બટનનો ઉપયોગ કરો:", get_menu_keyboard())
         except Exception:
             time.sleep(2)
         time.sleep(0.5)
