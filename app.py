@@ -2,6 +2,8 @@ import os
 import threading
 import requests
 import time
+import io
+import csv
 from collections import Counter
 from flask import Flask
 
@@ -39,29 +41,71 @@ def get_color_emoji(n):
     return "🔴" if n in RED_NUMBERS else "⚫"
 
 def fetch_direct_spins(needed_count):
-    """Fetch latest spins using page=0 and sort=desc for real-time accuracy"""
+    """Fetch latest spins for real-time analytics"""
+    url = f"{BASE_API}?size={max(needed_count, 50)}&sort=desc"
     results = []
-    page = 0
-    while len(results) < needed_count and page <= 2:
-        url = f"{BASE_API}?page={page}&size=100&sort=desc"
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=8)
-            if r.status_code == 200:
-                data = r.json()
-                if not data:
-                    break
-                for item in data:
-                    game_data = item.get("data", {})
-                    outcome = game_data.get("result", {}).get("outcome", {})
-                    if "number" in outcome and outcome.get("number") is not None:
-                        num = int(outcome["number"])
-                        results.append(num)
-                page += 1
-            else:
-                break
-        except Exception:
-            break
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=8)
+        if r.status_code == 200:
+            data = r.json()
+            for item in data:
+                game_data = item.get("data", {})
+                outcome = game_data.get("result", {}).get("outcome", {})
+                if "number" in outcome and outcome.get("number") is not None:
+                    results.append(int(outcome["number"]))
+    except Exception:
+        pass
     return results[:needed_count]
+
+def fetch_1500_spins():
+    """Fetch exactly 1500 latest spins from server"""
+    url = f"{BASE_API}?size=1500&sort=desc"
+    spins = []
+    seen_ids = set()
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            for item in data:
+                game_data = item.get("data", {})
+                sid = game_data.get("id")
+                outcome = game_data.get("result", {}).get("outcome", {})
+                settled_at = game_data.get("settledAt", "")
+                
+                if "number" in outcome and outcome.get("number") is not None:
+                    num = int(outcome["number"])
+                    if sid and sid not in seen_ids:
+                        seen_ids.add(sid)
+                        
+                        if num == 0:
+                            color = "Green"
+                            group = "Zero"
+                            parity = "Zero"
+                        else:
+                            color = "Red" if num in RED_NUMBERS else "Black"
+                            parity = "Even" if num % 2 == 0 else "Odd"
+                            if 1 <= num <= 9:
+                                group = "1-9"
+                            elif 10 <= num <= 18:
+                                group = "10-18"
+                            elif 19 <= num <= 27:
+                                group = "19-27"
+                            else:
+                                group = "28-36"
+
+                        spins.append({
+                            "id": sid,
+                            "number": num,
+                            "color": color,
+                            "group": group,
+                            "parity": parity,
+                            "time": settled_at
+                        })
+                        if len(spins) >= 1500:
+                            break
+    except Exception as e:
+        print("Fetch 1500 Error:", e)
+    return spins
 
 def analyze_spins_request(count):
     spins = fetch_direct_spins(count)
@@ -92,11 +136,9 @@ def analyze_spins_request(count):
     # 3. Repeated Numbers Logic
     counts = Counter(spins)
     if count == 25:
-        # માત્ર 25 સ્પિન માટે: 2 અથવા વધુ વખત (>= 2)
         repeats = {num: cnt for num, cnt in counts.items() if cnt >= 2}
         repeat_title = "Repeated Numbers (≥2 times):"
     else:
-        # અન્ય સ્પિન (30, 35, 40, 45, 50) માટે: 2 થી વધુ વખત (> 2)
         repeats = {num: cnt for num, cnt in counts.items() if cnt > 2}
         repeat_title = "Repeated Numbers (>2 times):"
 
@@ -106,7 +148,7 @@ def analyze_spins_request(count):
     else:
         repeat_str = "None"
 
-    # 4. 4 Groups Performance (1-9, 10-18, 19-27, 28-36 - Excluding 0)
+    # 4. 4 Groups Performance
     g1_count = sum(1 for n in spins if n in GROUP_1)
     g2_count = sum(1 for n in spins if n in GROUP_2)
     g3_count = sum(1 for n in spins if n in GROUP_3)
@@ -152,12 +194,14 @@ def get_menu_keyboard():
             [
                 {"text": "🎯 45 Spins", "callback_data": "btn_45"},
                 {"text": "🎯 50 Spins", "callback_data": "btn_50"}
+            ],
+            [
+                {"text": "📥 Download 1500 Spins (Excel)", "callback_data": "btn_download_1500"}
             ]
         ]
     }
 
 def send_telegram(chat_id, text, reply_markup=None):
-    """Sends messages directly to the initiating user's chat_id"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
@@ -167,12 +211,46 @@ def send_telegram(chat_id, text, reply_markup=None):
     except Exception as e:
         print("Telegram Send Error:", e)
 
+def send_telegram_document(chat_id, csv_buffer, filename, caption):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument"
+    files = {"document": (filename, csv_buffer.getvalue().encode('utf-8'), "text/csv")}
+    data = {"chat_id": chat_id, "caption": caption}
+    try:
+        requests.post(url, data=data, files=files, timeout=20)
+    except Exception as e:
+        print("Telegram Document Send Error:", e)
+
 def answer_callback(callback_query_id):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/answerCallbackQuery"
     try:
         requests.post(url, json={"callback_query_id": callback_query_id}, timeout=4)
     except:
         pass
+
+def handle_download_1500(chat_id):
+    send_telegram(chat_id, "⏳ સર્વર પરથી તાજેતરના ૧,૫૦૦ સ્પિન ડાઉનલોડ થઈ રહ્યા છે, કૃપા કરીને થોડી સેકન્ડ રાહ જુઓ...")
+    spins = fetch_1500_spins()
+    
+    if not spins:
+        send_telegram(chat_id, "❌ સર્વર પરથી ડેટા ફેચ કરવામાં ક્ષતિ આવી. કૃપા કરીને થોડીવાર પછી પ્રયાસ કરો.", get_menu_keyboard())
+        return
+
+    # જૂના થી નવા ક્રમમાં
+    spins.reverse()
+
+    # Create CSV in-memory
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Spin_No", "Round_ID", "Winning_Number", "Color", "Group", "Odd_Even", "Settled_At"])
+    for idx, s in enumerate(spins, 1):
+        writer.writerow([idx, s["id"], s["number"], s["color"], s["group"], s["parity"], s["time"]])
+
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    filename = f"AutoRoulette_1500_Spins_{timestamp}.csv"
+    caption = f"✅ Auto Roulette ના પૂરા {len(spins)} સ્પિનની Excel ફાઇલ તૈયાર છે!"
+    
+    send_telegram_document(chat_id, output, filename, caption)
+    send_telegram(chat_id, "🎲 અન્ય એનાલિસિસ માટે નીચેના બટન પસંદ કરો:", get_menu_keyboard())
 
 def bot_polling_loop():
     offset = 0
@@ -190,10 +268,13 @@ def bot_polling_loop():
                     user_chat_id = cq.get("message", {}).get("chat", {}).get("id")
                     answer_callback(cq.get("id"))
 
-                    counts = {"btn_25": 25, "btn_30": 30, "btn_35": 35, "btn_40": 40, "btn_45": 45, "btn_50": 50}
-                    if cb_data in counts and user_chat_id:
-                        report = analyze_spins_request(counts[cb_data])
-                        send_telegram(user_chat_id, report, get_menu_keyboard())
+                    if cb_data == "btn_download_1500" and user_chat_id:
+                        handle_download_1500(user_chat_id)
+                    else:
+                        counts = {"btn_25": 25, "btn_30": 30, "btn_35": 35, "btn_40": 40, "btn_45": 45, "btn_50": 50}
+                        if cb_data in counts and user_chat_id:
+                            report = analyze_spins_request(counts[cb_data])
+                            send_telegram(user_chat_id, report, get_menu_keyboard())
 
                 # Handle incoming messages
                 elif "message" in item:
@@ -205,20 +286,23 @@ def bot_polling_loop():
                         if msg_text == "/start":
                             welcome = (
                                 "👋 <b>Auto Roulette Wheel Tracker</b>\n\n"
-                                "Select an option below to analyze live spins:\n"
+                                "Select an option below to analyze live spins or export raw data:\n"
                                 "• 1️⃣ Last 10 Numbers (Live Flow)\n"
                                 "• 2️⃣ Unhit Red, Black & Zero Trigger Status\n"
                                 "• 3️⃣ Repeated Numbers\n"
-                                "• 4️⃣ 4-Group Breakdown (1-9, 10-18, 19-27, 28-36)"
+                                "• 4️⃣ 4-Group Breakdown (1-9, 10-18, 19-27, 28-36)\n"
+                                "• 📥 Download 1500 Spins (Excel)"
                             )
                             send_telegram(user_chat_id, welcome, get_menu_keyboard())
+                        elif msg_text.lower() in ["/download", "download", "excel", "1500"]:
+                            handle_download_1500(user_chat_id)
                         else:
                             clean_val = msg_text.replace("/", "")
                             if clean_val.isdigit() and int(clean_val) in [25, 30, 35, 40, 45, 50]:
                                 report = analyze_spins_request(int(clean_val))
                                 send_telegram(user_chat_id, report, get_menu_keyboard())
                             else:
-                                send_telegram(user_chat_id, "🎲 Please use the buttons below to analyze spins:", get_menu_keyboard())
+                                send_telegram(user_chat_id, "🎲 Please use the buttons below to analyze spins or download data:", get_menu_keyboard())
         except Exception:
             time.sleep(2)
         time.sleep(0.5)
