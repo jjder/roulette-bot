@@ -12,7 +12,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Auto Roulette Bot is Running 24/7 with Live Alerts!"
+    return "Auto Roulette Bot is Running 24/7 on Free Web Service!"
 
 # ================= CONFIGURATION =================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9039066795:AAFdu2sSYHMfGoj8o0py7sxhUOx9POk8mwk")
@@ -34,23 +34,13 @@ DOZEN_3 = set(range(25, 37))  # 25 to 36
 RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 BLACK_NUMBERS = {2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35}
 
-SUBSCRIBED_CHATS = set()
-
 def get_color_emoji(n):
     if n == 0:
         return "🟢"
     return "🔴" if n in RED_NUMBERS else "⚫"
 
-def get_dozen_name(num):
-    if num in DOZEN_1:
-        return "1st Dozen (1-12)"
-    elif num in DOZEN_2:
-        return "2nd Dozen (13-24)"
-    elif num in DOZEN_3:
-        return "3rd Dozen (25-36)"
-    return "Zero"
-
 def fetch_direct_spins(needed_count=30):
+    """Fetch latest spins for real-time analytics"""
     url = f"{BASE_API}?size={max(needed_count, 50)}&sort=desc"
     results = []
     try:
@@ -67,6 +57,7 @@ def fetch_direct_spins(needed_count=30):
     return results[:needed_count]
 
 def fetch_1500_spins():
+    """Fetch exactly 1500 latest spins from server"""
     url = f"{BASE_API}?size=1500&sort=desc"
     spins = []
     seen_ids = set()
@@ -92,7 +83,12 @@ def fetch_1500_spins():
                         else:
                             color = "Red" if num in RED_NUMBERS else "Black"
                             parity = "Even" if num % 2 == 0 else "Odd"
-                            dozen = get_dozen_name(num)
+                            if num in DOZEN_1:
+                                dozen = "1st Dozen (1-12)"
+                            elif num in DOZEN_2:
+                                dozen = "2nd Dozen (13-24)"
+                            else:
+                                dozen = "3rd Dozen (25-36)"
 
                         spins.append({
                             "id": sid,
@@ -115,7 +111,7 @@ def analyze_30_spins():
     if total < 30:
         return f"⚠️ હાલમાં સર્વર પાસે માત્ર {total} સ્પિન ઉપલબ્ધ છે. કૃપા કરીને થોડીવાર પછી પ્રયાસ કરો."
 
-    # 1. તમામ 30 લેટેસ્ટ નંબર્સ
+    # 1. તમામ 30 લેટેસ્ટ નંબર્સ (લાઈવ ક્રમ)
     all_30_str = " ➔ ".join([f"{get_color_emoji(x)}{x}" for x in spins])
 
     # 2. આવી ગયેલા નંબર્સ (Hit Numbers - Red અને Black અલગ)
@@ -137,7 +133,7 @@ def analyze_30_spins():
     zero_count = spins.count(0)
     zero_status = f"YES (HIT - {zero_count}x)" if zero_count > 0 else "NO (NOT HIT)"
 
-    # 5. ૨ થી વધુ વખત આવેલા નંબર્સ (> 2 times)
+    # 5. 2 થી વધુ વખત આવેલા નંબર્સ (> 2 times)
     counts = Counter(spins)
     repeats = {num: cnt for num, cnt in counts.items() if cnt > 2}
     if repeats:
@@ -146,7 +142,7 @@ def analyze_30_spins():
     else:
         repeat_str = "None"
 
-    # 6. 1, 2, 3 ડઝન ટકાવારી અને કૌંસમાં સંખ્યા (0 સિવાય)
+    # 6. 1, 2, 3 ડઝન ટકાવારી અને કાઉન્ટ (0 સિવાય)
     d1_count = sum(1 for n in spins if n in DOZEN_1)
     d2_count = sum(1 for n in spins if n in DOZEN_2)
     d3_count = sum(1 for n in spins if n in DOZEN_3)
@@ -224,8 +220,10 @@ def handle_download_1500(chat_id):
         send_telegram(chat_id, "❌ સર્વર પરથી ડેટા ફેચ કરવામાં ક્ષતિ આવી. કૃપા કરીને થોડીવાર પછી પ્રયાસ કરો.", get_menu_keyboard())
         return
 
+    # જૂના થી નવા ક્રમમાં
     spins.reverse()
 
+    # Create CSV in-memory
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Spin_No", "Round_ID", "Winning_Number", "Color", "Dozen", "Odd_Even", "Settled_At"])
@@ -237,48 +235,7 @@ def handle_download_1500(chat_id):
     caption = f"✅ Auto Roulette ના પૂરા {len(spins)} સ્પિનની Excel ફાઇલ તૈયાર છે!"
     
     send_telegram_document(chat_id, output, filename, caption)
-    send_telegram(chat_id, "🎲 નીચે આપેલા બટનનો ઉપયોગ કરો:", get_menu_keyboard())
-
-# ================= 🚨 LIVE DOZEN REPEAT ALERT MONITOR =================
-def live_dozen_alert_monitor():
-    last_processed_id = None
-    previous_number = None
-    previous_dozen = None
-
-    while True:
-        try:
-            url = f"{BASE_API}?size=2&sort=desc"
-            r = requests.get(url, headers=HEADERS, timeout=6)
-            if r.status_code == 200:
-                data = r.json()
-                if data and isinstance(data, list):
-                    latest_item = data[0].get("data", {})
-                    latest_id = latest_item.get("id")
-                    outcome = latest_item.get("result", {}).get("outcome", {})
-                    
-                    if latest_id and latest_id != last_processed_id and "number" in outcome and outcome.get("number") is not None:
-                        current_num = int(outcome["number"])
-                        current_dozen = get_dozen_name(current_num)
-
-                        if previous_dozen is not None and current_dozen != "Zero" and previous_dozen != "Zero":
-                            if current_dozen == previous_dozen:
-                                alert_text = (
-                                    f"🚨 <b>DOZEN REPEAT ALERT!</b> 🚨\n"
-                                    f"━━━━━━━━━━━━━━━━━━━\n"
-                                    f"⚡ <b>{current_dozen}</b> સતત બીજી વાર હિટ થયો!\n\n"
-                                    f"• પાછલો નંબર: {get_color_emoji(previous_number)} <b>{previous_number}</b>\n"
-                                    f"• લેટેસ્ટ નંબર: {get_color_emoji(current_num)} <b>{current_num}</b>\n"
-                                    f"━━━━━━━━━━━━━━━━━━━"
-                                )
-                                for cid in list(SUBSCRIBED_CHATS):
-                                    send_telegram(cid, alert_text)
-
-                        last_processed_id = latest_id
-                        previous_number = current_num
-                        previous_dozen = current_dozen
-        except Exception:
-            pass
-        time.sleep(3)
+    send_telegram(chat_id, "🎲 અન્ય એનાલિસિસ માટે નીચેના બટન પસંદ કરો:", get_menu_keyboard())
 
 def bot_polling_loop():
     offset = 0
@@ -289,14 +246,12 @@ def bot_polling_loop():
             for item in res.get("result", []):
                 offset = item["update_id"] + 1
 
+                # Handle inline button clicks
                 if "callback_query" in item:
                     cq = item["callback_query"]
                     cb_data = cq.get("data")
                     user_chat_id = cq.get("message", {}).get("chat", {}).get("id")
                     answer_callback(cq.get("id"))
-
-                    if user_chat_id:
-                        SUBSCRIBED_CHATS.add(user_chat_id)
 
                     if cb_data == "btn_download_1500" and user_chat_id:
                         handle_download_1500(user_chat_id)
@@ -304,20 +259,19 @@ def bot_polling_loop():
                         report = analyze_30_spins()
                         send_telegram(user_chat_id, report, get_menu_keyboard())
 
+                # Handle incoming messages
                 elif "message" in item:
                     msg = item["message"]
                     user_chat_id = msg.get("chat", {}).get("id")
                     msg_text = msg.get("text", "").strip()
 
                     if user_chat_id:
-                        SUBSCRIBED_CHATS.add(user_chat_id)
-
                         if msg_text in ["/start", "start"]:
                             welcome = (
-                                "👋 <b>Auto Roulette Wheel Tracker & Alert Bot</b>\n\n"
-                                "✅ <b>લાઈવ ડઝન એલર્ટ સક્રિય છે:</b> જ્યારે પણ કોઈ ડઝન સતત બીજી વાર આવશે ત્યારે તમને તરત મેસેજ મળશે.\n\n"
-                                "• 🎯 <b>Last 30 Spins:</b> ૩૦ સ્પિનનું વિગતવાર એનાલિસિસ\n"
-                                "• 📥 <b>Download 1500 Spins:</b> તાજેતરના ૧,૫૦૦ સ્પિનની Excel ફાઇલ"
+                                "👋 <b>Auto Roulette Wheel Tracker</b>\n\n"
+                                "નીચે આપેલા વિકલ્પોમાંથી પસંદ કરો:\n"
+                                "• 🎯 <b>Last 30 Spins:</b> ૩૦ સ્પિનનું સંપૂર્ણ લાઇવ એનાલિસિસ\n"
+                                "• 📥 <b>Download 1500 Spins:</b> તાજેતરના ૧,૫૦૦ સ્પિનની Excel ડાઉનલોડ"
                             )
                             send_telegram(user_chat_id, welcome, get_menu_keyboard())
                         elif msg_text.lower() in ["/download", "download", "excel", "1500"]:
@@ -331,10 +285,9 @@ def bot_polling_loop():
             time.sleep(2)
         time.sleep(0.5)
 
+# Run polling loop in background thread for Gunicorn & Render compatibility
 threading.Thread(target=bot_polling_loop, daemon=True).start()
-threading.Thread(target=live_dozen_alert_monitor, daemon=True).start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-                    
